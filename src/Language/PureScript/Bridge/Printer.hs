@@ -67,7 +67,8 @@ moduleToText settings m = T.unlines $
      ]
   ++ map (sumTypeToText settings) (psTypes m)
   where
-    otherImports = importsFromList (_lensImports settings ++ _genericsImports settings)
+    otherImports =
+      importsFromList (_lensImports settings ++ _genericsImports settings ++ _jsonImports)
     allImports = Map.elems $ mergeImportLines otherImports (psImportLines m)
 
 
@@ -78,6 +79,13 @@ _genericsImports settings
   | otherwise =
     [ ImportLine "Data.Generic" $ Set.fromList ["class Generic"] ]
 
+_jsonImports :: [ImportLine]
+_jsonImports =
+    [ ImportLine "Data.Argonaut.Encode" $ Set.fromList ["class EncodeJson"]
+    , ImportLine "Data.Argonaut.Decode" $ Set.fromList ["class DecodeJson"]
+    , ImportLine "Data.Argonaut.Encode.Generic.Rep" $ Set.fromList ["genericEncodeJson"]
+    , ImportLine "Data.Argonaut.Decode.Generic.Rep" $ Set.fromList ["genericDecodeJson"]
+    ]
 
 _lensImports :: Switches.Settings -> [ImportLine]
 _lensImports settings
@@ -123,8 +131,12 @@ instances :: Switches.Settings -> SumType 'PureScript -> [Text]
 instances settings st@(SumType t _ is) = map go is
   where
     go :: Instance -> Text
-    go i = "derive instance " <> T.toLower c <> _typeName t <> " :: " <> extras i <> c <> " " <> typeInfoToText False t <> postfix i
+    go i = prefix i <> "instance " <> dc <> _typeName t <> " :: " <> extras i <> c <> " " <> typeInfoToText False t <> postfix i
       where c = T.pack $ show i
+            dc = (T.toLower . T.take 1) c  <> T.drop 1 c
+            prefix EncodeJson = ""
+            prefix DecodeJson = ""
+            prefix _ = "derive "
             extras Generic | stpLength == 0 = mempty
                            | stpLength == 1 = genericConstraintsInner <> " => "
                            | otherwise      = bracketWrap genericConstraintsInner <> " => "
@@ -133,6 +145,8 @@ instances settings st@(SumType t _ is) = map go is
             postfix Generic
               | Switches.genericsGenRep settings = " _"
               | otherwise                        = ""
+            postfix EncodeJson = " where\n  encodeJson = genericEncodeJson"
+            postfix DecodeJson = " where\n  decodeJson = genericDecodeJson"
             postfix _ = ""
             stpLength = length sumTypeParameters
             sumTypeParameters = filter isTypeParam . Set.toList $ getUsedTypes st
